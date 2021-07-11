@@ -1,0 +1,469 @@
+head	1.3;
+access;
+symbols;
+locks
+	jim:1.3; strict;
+comment	@# @;
+
+
+1.3
+date	2005.07.15.20.59.17;	author jim;	state Exp;
+branches;
+next	1.2;
+
+1.2
+date	2005.07.11.23.39.38;	author jim;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	2005.06.28.14.03.23;	author jim;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.3
+log
+@Add
+@
+text
+@* SSAX parser
+
+Chicken only includes the parser itself, not any auxiliary pieces,
+such as SXML->HTML or SXSLT.
+
+** To load SXML->HTML converter
+(load "~/scheme/eggs/ssax/ssax-core.scm")    ; needed only for Oleg's prelude
+(load "~/scheme/oleg/SXML-tree-trans.scm")   ; loads fine
+(load "~/scheme/oleg/vSXML-tree-trans.scm")  ; verifies okay
+(load "~/scheme/oleg/make-char-quotator.scm"); for SXML-to-HTML (not present in Chicken prelude)
+(load "~/scheme/oleg/SXML-to-HTML.scm")
+
+; Note: had to define 'inc' for make-char-quotator.  Current chicken port uses ++ for whatever reason.
+(SXML->HTML `(html (body (p "hello"))))
+; => <html><body><p>hello</p></body></html>
+
+Ideally, ssax-core prelude would be pulled out of ssax-core so it is
+usable with other pieces of Oleg's code.
+
+
+* Other resources
+
+** web-site.ss 
+"The web-site collection is a library for generating static web content
+with SXML and SXSLT templates.  It makes use of the SSAX library, which
+is now included as a standard PLT collection."
+http://planet.plt-scheme.org/docs/dherman/web-site.plt/2/0/doc.txt
+
+** Papers
+*** XML, XPath, XSLT implementations as SXML, SXPath, and SXSLT
+http://okmij.org/ftp/papers/SXs-talk.pdf
+  How S-exprs for XML fit in a legacy (document and programmer) world.
+  Discussion of SXPath, SXML, SXSLT, interoperability.
+  A good introduction.
+http://okmij.org/ftp/papers/SXs.pdf
+*** SXSLT vs XSLT; walkthrough of SXSLT
+http://okmij.org/ftp/papers/SXSLT-talk.pdf
+
+http://pair.com/lisovsky/STX
+ ??
+
+** Oleg's SXML->HTML extended examples
+such as xml.scm and SXML-to-HTML-ext.scm.
+http://okmij.org/ftp/Scheme/xml.html#XML-authoring
+
+** sxpath in sxml-tools
+Implementation of XPath in Scheme.  It looks much easier to use this
+than to pick out elements from an SXML tree by hand.
+
+home page is http://okmij.org/ftp/Scheme/xml.html#SXPath
+
+Examples at http://www196.pair.com/lisovsky/query/sxpath/
+  especially: http://www196.pair.com/lisovsky/query/sxpath/tutorial/tutorial4.scm
+  -> saved to ~/scheme/sxml/sxpath-tutorial.scm
+
+You must include a *TOP* element for sxpath to work, but it can be any symbol:
+  '(*TOP* (elt "text")) and '(zzz (elt "text"))
+  are both searchable with (sxpath '(elt)), but
+  '(elt "text") and '((elt "text")) are not.
+  -> Each symbol element eg. elt, translates to (select-kids (node-typeof? 'elt))
+     so this is expected behaviour.
+
+
+
+*** Chicken outdated version
+Oleg's code does not support textual XPath representation.
+-> Lisovsky et al have updated versions @@ ssax.sf.net.
+-> That includes many other SXML related tools.
+Chicken's code is supposedly based off Lisovsky's version as of
+ May 21 2004, but it only consists of "sxpath.scm" and is basically
+ Oleg's code exactly.  So I assume some screw-up occurred.
+(chicken post: http://lists.gnu.org/archive/html/chicken-users/2004-05/msg00076.html)
+But it never happened because on 7 Mar 2005 sxpath was posted again:
+http://lists.gnu.org/archive/html/chicken-users/2005-03/msg00009.html
+
+*** Porting ssax.sf.net version of sxpath.
+: Porting--starting from gambit version.
+  util.scm -- there are a bunch of text files and scripts starting with util*
+   I created, that analyse which functions in util.scm are used.
+   Esp. utils-required.txt.  Mainly string functions.
+
+;; string-split   : arg 2 is a list; chicken native is string.
+   Can define string-split that automatically uses list->string,
+   though this overrides a builtin.  Requires a (no standard-bindings string-split)
+   or whatever, and should probably be confined to that file only with a hide
+   and/or a include.
+   The problem boils down to, how to provide a function only within a group
+   of source files and not externally to the user.
+
+Well, packages.scm has the goods.  It separates everything into packages,
+exports what's necessary, pulls in only what's necessary (granularity is
+individual functions in a module).
+-> Believe this is Scheme48 syntax.
+-> References modules such as coutputs and assertions in
+   http://download.plt-scheme.org/scheme/plt/collects/ssax/
+-> Many of these in turn just source files from the ssax.sf.net distribution (in
+   the same directory, plt/collects/ssax
+-> For example, coutputs.ss declares a mzscheme module and sources output.scm
+   verbatim.  Interesting technique.
+
+-- If I (require-extension coutputs) from sxpath.scm, when compiled the extension
+   will not be loaded; instead it will be loaded at runtime, and made available to
+   everyone.  Cannot figure out how to load an extension only for one namespace.
+
+-- Note: basically everything from the scheme files extensions are exported
+   everywhere, in packages.scm.  The only things that should not be exported
+   are coutputs and oleg-utils (for string-split and substring?)
+-- Therefore, these can freely be compiled separately, each exporting its
+   entire interface.  They should include coutputs and the string code, so that
+   they are not exported
+
+sxpathlib
+  srfi-13 ; string-prefix? string-index-right; only required for ntype-namespace-id??
+  ; assertions  ; not required
+  coutputs
+  ; ppretty-print  ; pp is native; display-circle is not used in the sxml-tools and need not be defined
+
+guide:
+  not used anywhere (provide anyway?)
+
+assertions:
+-> Not required.  assert is chicken native, and assure is not used
+
+xpath-ast.scm
+xpath-context.scm
+-> Not loaded by packages; are their functions referenced?
+
+oleg-string-ports:
+  (provide with-output-to-string call-with-input-string with-input-from-string)
+ -> which are already available natively in chicken.
+
+-> sxml-tools latest version replaced string-rindex with string-index-right
+   from srfi-13.
+-> Must select "modularization" branch in CVS.
+
+Source changes:
+: Commented out define-syntax sxml:find-name-separator in sxml-tools.scm.
+: inexact->exact on round in sxpath-ext.scm (L173)
+
+**** Verification
+: csi -eval '(load "chicken/sxml-tools.scm") (load "chicken/tests-no-parent.scm") (load "tests/vsxpath-ext.scm")'
+;; vsxpathlib.scm -- 1 test fails: (test-sxpath (quote (//)))     (line 234)
+                     should be same as (sxml:descendant-or-self sxml:node?) test
+   -- Apparently expected behavior.
+   -- See http://sourceforge.net/mailarchive/message.php?msg_id=10210439
+   -- The code this expands to selects attribute nodes, while sxml:descendant-or-self
+      is correct.
+   -- Also see http://xmlhack.ru/protva/xquery/index.php/WhyNotSxTools
+   -- Incorrect behavior demonstrated (as if it's correct) in example at
+      http://www196.pair.com/lisovsky/query/examples/xpath/100.txt
+   -- Seems on 2004/12/14 sxpath.scm was updated but my version doesn't work:
+      http://sourceforge.net/mailarchive/message.php?msg_id=10300589
+   -- Must sync with MAIN branch, not 'modularization'.  See below.
+;; vtxpath.scm -- successful
+           -- Test 1 was failing:
+              sxml:test-xpointer+index"xpointer( */*[9]/*[5]/following::node() = //appendix//item[1] )"
+               -> Error: (list-tail) bad argument type: 2.0
+                 -> Fixed -- round in sxpath-ext.scm not using inexact->exact as in txpath.scm
+;; vsxpath-ext.scm -- successful
+;; vcontext.scm -- successful
+   Requires xpath-context and xpath-ast.  These use let-values* which is obsolete; added define-macro to beginning of sxml-tools.scm
+   csi -eval '(use debug) (load "chicken/sxml-tools.scm") (load "chicken/tests-no-parent.scm") (load "xpath-ast.scm") (load "xpath-context.scm") (load "tests/vcontext.scm")'
+;; vmodif.scm -- successful
+   -- needs xpath-context and ddo.
+   csi -eval '(use debug) (load "chicken/sxml-tools.scm") (load "chicken/tests-no-parent.scm") (load "xpath-ast.scm") (load "xpath-context.scm") (load "ddo-txpath.scm") (load "ddo-axes.scm")  (load "modif.scm") (load "tests/vmodif.scm")'
+
+;;; not implemented yet:
+
+;; vddo.scm : csi -eval '(use debug) (load "chicken/sxml-tools.scm") (load "chicken/tests-no-parent.scm") (load "xpath-ast.scm") (load "xpath-context.scm") (load "ddo-txpath.scm") (load "ddo-axes.scm")  (load "tests/vddo.scm")'
+   Got unexpected result on
+   (ddo:txpath doc/body/chapter[position()=2 or position()=5]/@@id/ancestor-or-self::node()[position()<=3]/child::node())
+
+;; No tests for xlink, xlink-parser.
+
+**** Sync with latest CVS
+Latest development is being done on HEAD branch, not modularization, including fix for sxpath //.
+
+ddo-axes.scm: none
+ddo-txpath.scm: none
+lazy-xpath.scm: string-rindex
+modif.scm: none
+stx-engine.scm: sxml:error
+sxml-tools: remove sxml:error function;
+sxpath-ext.scm: let-values*
+sxpathlib.scm: string-rindex; uses (-- x) for (- x 1)
+sxpath-plus.scm: none
+sxpath.scm: none
+txpath.scm: sxml:error in sxml:xpointer-runtime-error (now exit -1); string-rindex; 
+xlink-parser.scm: string-rindex
+xlink.scm: none
+xpath-ast.scm: none
+xpath-context.scm: none
+xpath-parser: used ascii->char; so ascii.scm probably no longer necessary
+
+Did not modify string-rindex, just included an alias macro.
+All tests now pass successfully.
+
+** XML->SXML
+*** htmlprag
+html->shtml and shtml->html conversion, simpler than oleg's SXML->HTML.
+I wrote a wrapper around html->shtml which pretty prints the output---
+by default it is barely human-editable.  I formerly used write-shtml-as-html
+to create an HTML page from SHTML source in eggdoc, but now use my
+sxml-transforms egg.
+
+htmlprag can parse poorly-formed html, unlike SSAX:XML->SXML.  It will
+retain all newlines and tabs, which may not be appropriate.
+(call-with-input-file "supportmail.html"
+		      (lambda (port)
+		      	(html->shtml port)))
+
+*** Oleg's html-parser.scm
+Oleg's HTML parser does similar.  Note that it is only an example and requires
+a bit of munging to be used as a library.
+-- http://okmij.org/ftp/Scheme/html-parser.scm
+This is not included in the ssax egg, but is available in the sxml-transforms
+egg under SSAX/examples/.  However, it requires cout/cerr/nl (available in
+(sxml-tools egg under extras/output.scm) and a compatibility layer to match
+capitalization between the ssax egg (SSAX) and the example (ssax):
+ssax:read-char-data -> SSAX:read-char-data [in the ssax egg]
+ssax:complete-start-tag
+
+-- Note: ssax egg is v4.9 -- CVS version uses lowercase ssax.  Hence the mismatch.
+
+This glue layer is in ~/scheme/ssax-html-parser.scm
+although it doesn't work.  So htmlprag is the quick solution.
+
+
+*** SSAX:XML->SXML
+
+Gauche doc @@ http://www.shiro.dreamhost.com/scheme/gauche/man/gauche-refe_304.html#SEC354.
+
+This parser is finicky.
+For example, parsing eggdoc's output "args.html", which is XHTML 1.0 Strict,
+complains:
+Error: (ssax-utils.scm, line 160) [SSAX: port args.html, at 354/84] [wf-entdeclared] broken for nbsp
+
+This is kind of discussed by http://www.w3.org/TR/REC-xml/#include-if-valid --
+by default XML recognizes only amp, gt, lt, apos, and quot.
+These are defined in ssax:predefined-parsed-entities and checked in
+ssax:handle-parsed-entity of SSAX.scm.
+
+It seems &#160; is a better choice than &nbsp;
+
+If I try to define nbsp internally with
+   <!DOCTYPE nbsp [<!ENTITY nbsp "&nbsp;">]>
+I get
+   Warning: Internal DTD subset is not currently handled
+and the same problem with nbsp.
+See http://sourceforge.net/mailarchive/message.php?msg_id=10941360
+  for an explanation about not parsing DTDs.
+
+SSAX:XML->SXML is meant to perform parsing of -well-formed- XML
+documents, meaning those for which a doctype is not required.
+External doctypes are not parsed, and you can't declare an internal
+doctype (with permitted entities).  And you can't pass in extra
+entities (perhaps you could override ssax:predefined-parsed-entities
+if you had to).  Thus, you can't successfully parse &nbsp;.  &#160;
+works fine, though.
+
+It's recommended you take the ssax:xml->sxml code and extend it to
+allow a passed in entities alist, if you want to get nbsp to work.
+
+*** Resume.xml -> sxml
+Converted resume.xml to sxml with ssax:xml->sxml since it was well-formed.
+
+(with-output-to-file "~/Desktop/resume.sxml"
+  (lambda () 
+    (pp (call-with-input-file "~/Desktop/resume.xml"
+          (lambda (port) 
+            (SSAX:XML->SXML port '() ))))))
+
+** Sxml transformation
+
+*** SXSLT (Pre-post-order)
+Oleg's SXML-tree-trans.scm
+Transforms source SXML tree using transformation environment (stylesheet), which
+is an alist of nodes to transformers.
+"Post-order is equivalent to evaluating the SXML tree as if it were scheme code;
+ pre-order is like Scheme macro expansion."
+
+**** sxslt-advanced.scm
+Test MAKE-TOC-ENTRIES:
+(make-toc-entries `((*section (1) "Section1" (p "This is section 1"))
+                    (*section (2) "Section 2" 
+                      (*section (2 1) "Section2-1" (p "This is section 2-1")))))
+=> ((li "1" ". " "Section1" #f) (li "2" ". " "Section 2" (ul ((li "1.2" ". " "Section2-1" #f)))))
+;; Notice extra parentheses and #f's; these will be discarded by SRV:send-reply.
+;; You could discard extra parentheses with (pre-post-order-composable <result> alist-conv-rules)
+=> ((li "1" ". " "Section1") (li "2" ". " "Section 2" (ul (li "1.2" ". " "Section2-1" #f))))
+;; but again, when passed through SRV:send-reply (or SXML->HTML) you get the same output.
+
+**** sxmlcnv.scm
+http://www.netfort.gr.jp/~kiyoka/sxmlcnv/index.scm
+Example referred to in SXSLT-talk.pdf; has been expanded since then
+
+**** Manifest.xml
+Described in Sec 5 of SXs.pdf
+See SXs.pdf footnote for Manifest.scm [23]
+**** sxml-to-sxml.scm
+pre-post-order that always preserves sxml correctness
+SXML correctness will usually, but not always, be preserved when using pre-post-order
+to transform SXML->SXML.  Either way, pre-post-order can process the result.  However,
+SXPath cannot query a "malformed" document.
+
+
+*** SXML->SHTML
+http://okmij.org/ftp/Scheme/sxslt-advanced.scm
+See 'HTML/XML authoring in Scheme' in http://okmij.org/ftp/Scheme/xml.html#Papers
+
+DOCTYPE is not automatically generated.  You may provide a html:begin or similar element
+and transform it into a doctype as in generic-web-rules.
+
+Many of the rules in Oleg's code (e.g. generic-web-rules) generate HTML tags directly instead
+of transforming to SHTML and allowing *default* and *text* to take over.  The latter is
+an example of an n-order tag.  However, NUMBER-SECTIONS and MAKE-TOC-ENTRIES do SXML->SXML rewrites
+of (sections) to (*sections) and (*sections) to (ul (li "2.1" ...)), respectively.
+
+*** STX
+http://www.pair.com/lisovsky/transform/stx/
+Needs to be investigated further.
+"Translates a source document and stylesheet into SXML,	then applies one to
+ the other.  Permits embedding of Scheme functions into XSLT templates (scm:eval)
+ and allows writing template rules as first-class Scheme functions (scm:template)."
+*** ASXT egg
+Another Scheme XML transformation library, by Neil van Dyke.  "ASXT is somewhat
+similar to Oleg Kiselyov's Pre-post-order (SXML-tree-trans.scm) and Kirill
+Lisovsky's STX ... ASXT might be described as pre-post-order with inheritance
+and only preorder traversal, and as stx-engine without [SXPath]"
+
+ASXT seems to be the starting point for future toolkits.
+
+*** Porting SSAX transformation code
+"sxml-transforms"?
+Even if examples and Oleg's website-specific code are not included in the extension,
+I'd still like to be able to run the examples easily.  This would require full access
+to Oleg's util.scm and sxml-to-html-ext.scm, some of which would be omitted in the
+extension.
+
+sxslt-advanced.scm : needs list-intersperse, from 
+                     util.scm [also contains string-split; make-char-quotator; ...]
+  list-intersperse == intersperse [from chicken]
+
+SXML-to-HTML-ext.scm : seems to contain combination of generally useful stuff like
+  "universal-conversion-rules" but also specific stuff for Oleg's webpage,
+  like make-footer.  It appears that only universal-conversion-rules, universal-protected-rules,
+  and alist-conv-rules are required; the rest are effectively examples.
+
+**** Those who use util.scm functions
+functions: (any? list-intersperse list-intersperse! list-tail-diff string-rindex
+            substring? string->integer string-split make-char-quotator)
+
+any?: parent-pointers.scm
+list-intersperse: sxslt-advanced.scm
+list-intersperse!: none
+list-tail-diff: none
+string-rindex: <-- Can be discarded; already dropped for string-index-right
+substring?: none
+string->integer: validate-doctype-simple.scm, SXML-to-HTML-ext.scm
+string-split: SXML-to-HTML-ext.scm [in GENERIC-WEB-RULES; chicken-compatible syntax anyway]
+make-char-quotator: SXML-to-HTML.scm, daml-parse-unparse.scm, 
+                    sxml-db-conv.scm, sxslt-advanced.scm  <-- perhaps should be exported
+                    -- requires "inc"
+
+
+
+-- If we don't export a function, will it be omitted from the final library/executable? 
+(Assuming compiled with -O2) If so, we don't need to physically delete list-tail-diff etc. --
+
+**** Other exported functions
+lookup-def -- SXML-to-HTML-ext.scm
+  Note lookup-def is defined as a macro in myenv.scm
+SXML-to-HTML.scm needs "nl" for SXML->HTML (only if you pass it html:begin element)
+  -> i.e.  (SXML->HTML `(html:begin "This document" (body (p "crap"))))
+coutputs (output.scm) required by SXML-to-HTML-ext (the example parts) and lookup-def
+   and by most of the examples
+sxslt-advanced needs srfi-1 for cons* and, optionally, filter
+  -> Commented out filter in sxslt-advanced
+universal-conversion-rules is overridden in docs/SXML.scm -- the only difference
+is pretty printing of the HTML, in that "inline" elements are not forced onto
+their own line, and there are empty lines after each major tag pair e.g. 
+  <p>...</p>
+
+  <h1>..</h1>
+
+**** pre-post-order-composable
+sxml-to-sxml.scm : need pre-post-order and map-node-concat [internal]
+  Interestingly, this does not have any dependencies.
+  Compiled to sxml-to-sxml extension -- make a diff for this
+**** xhtml rules
+Added entag-xhtml to chicken/xhtml.scm and aliased to entag, so
+universal-conversion-rules will properly render empty elements.
+@
+
+
+1.2
+log
+@Many changes
+@
+text
+@a0 1
+
+d198 2
+a199 1
+** htmlprag egg
+d202 70
+a271 4
+by default it is barely human-editable.  Currently, I use write-shtml-as-html
+to create an HTML page from SHTML source in eggdoc.
+
+
+d273 1
+a273 1
+** SXML transformation
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d37 2
+a60 2
+  -- Although, oleg's sxpath.scm uses several examples which do not
+     appear to include *TOP* element at all.
+d62 3
+d205 55
+a259 1
+** ASXT egg
+d267 60
+a326 3
+** STX
+http://www.pair.com/lisovsky/transform/stx/
+Not examined.
+@

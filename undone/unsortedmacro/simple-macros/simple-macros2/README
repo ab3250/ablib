@@ -1,0 +1,248 @@
+
+altdorf.ai.mit.edu: pub/jar/simple-macro.tar
+		    or ~jar/macro/
+
+This package provides an interpreter and an expander for the
+high-level macro facility described in the Revised^4 Scheme Report
+appendix: DEFINE-SYNTAX, SYNTAX-RULES, and LET-SYNTAX (but not
+LETREC-SYNTAX).  It's about the simplest, most straightforward
+implementation that I could come up with.  It is intended to bridge
+the gap between the terseness of the POPL '91 paper and the relatively
+large and cumbersome implementations in the context of the full Scheme
+language.
+
+I still think the basic idea of the new macros is simple, but there
+seems to be a lack of good expository material at the semantic or
+implementation level.  This is the beginning of an attempt to fill
+that void.  It was NOT written with speed in mind, but it is supposed
+to be suggestive of how a fast implementation might work.  In
+particular, evaluation doesn't require any pre-pass over the code, and
+there is no alpha-conversion even in the full expander.
+
+--------------------
+
+Contents:
+
+  syntax.scm    The semantic core: environments, denotations, macros
+  ev.scm        Evaluator (syntax.scm client; does not rely on expander)
+  ex.scm        Expander (syntax.scm client; does not rely on evaluator)
+  usual.scm     Definitions of usual macros (AND, LET, etc.)
+  rules.scm     Compiler for SYNTAX-RULES pattern language
+  table.scm     Simple lookup table utility
+  memo.scm	Memoization utility
+  values.scm    VALUES and CALL-WITH-VALUES (R5RS compatibility)
+  for-s48.scm   Configuration file for use with Scheme 48
+  faster.scm    Simple preprocessor (work in progress)
+  loser.scm	A benchmark (probably not a very good one)
+
+--------------------
+
+To load into an ordinary Scheme:
+
+ 1. If VALUES and CALL-WITH-VALUES don't exist, load values.scm.
+
+ 2. If you want to be able to use DEFINE-SYNTAX, figure out how to
+    obtain an EVAL procedure in your particular Scheme implementation.
+    EVAL should take two arguments; the first argument is an
+    expression, and the second argument will always be the value of
+    (INTERACTION-ENVIRONMENT) (which you may have to define).
+
+ 3. If MAKE-TABLE, TABLE-REF, and TABLE-SET! don't exist, load
+    table.scm. 
+
+ 4. Load the real stuff:
+    (for-each load '("usual.scm" "rules.scm" "memo.scm"
+		     "syntax.scm" "ev.scm" "ex.scm"))
+
+--------------------
+
+Playing around:
+
+The main entry points for play purposes are TST and EX.
+TST takes one argument, an expression, and runs the evaluator on it.
+EX takes one argument, an expression, and runs the expander on it.
+
+    (tst '(let ((x 1)) x)) => 1
+    (ex  '(let ((x 1)) x)) => '((lambda (x) x) 1)
+
+(I will be using "quasi-normalization" notation throughout - if the
+result of an evaluation is a symbol or list, it will be preceded with
+a single quote mark: e.g. 'foo => 'foo.)
+
+    (ex  '(let* ((lambda 2)
+		 (mu 3))
+	    (* lambda mu)))
+
+      =>  ((lambda (lambda)
+	     (with-aliases let 5
+	       ((#(<marker> lambda 5) (mu) (* lambda mu)) 3)))
+	   2)
+
+Here's a hairier example to try.
+
+    (tst '(define-syntax foo
+	    (syntax-rules ()
+	      ((foo x y) (let* ((foo 8)
+				(x (+ y foo))
+				(foo +))
+			   (foo x y))))))
+
+These should all evaluate (using TST) to 18:
+
+    (tst '(foo name 5))
+    (tst '(foo foo 5))
+    (tst '(foo lambda 5))
+
+Also try (ex '(foo name 5)), etc.
+
+--------------------
+
+Limitations:
+
+It doesn't handle:
+
+ - Rest arguments
+ - Internal defines
+ - LETREC-SYNTAX
+ - Macro-defining macros
+
+None of these (except the last, which I still don't fully understand)
+would be difficult to add.  Their presence would obscure the
+underlying simplicity of this system.
+
+Also, many error conditions go undetected, including:
+ - Evaluating non-expressions (vectors, (), etc.)
+ - Syntax of special forms (things like (quote x y))
+ - Number-of-arguments error checking on procedure call
+ - Assignment to built-in bindings (e.g. (set! car 'edsel))
+
+Note: abstraction in the treatment of expressions has been eschewed
+for the sake of brevity.  Thus the use of PAIR?, CADDR, etc. in the
+evaluator and expander.  This is not generally considered tobe good
+style.
+
+--------------------
+
+Note on the output of the epxander:
+
+A key feature of this implementation is that it doesn't alpha-convert
+the user's program.  This should imply faster processing of macros, as
+well as the possibility of first-class environments and improved
+debuggability.
+
+In order to avoid alpha-conversion, the expander needs two special
+features in the target language:
+
+1. Non-symbol identifiers
+
+   The identifiers produced by GENERATE must be acceptable to whatever
+   will be processing the output.  In particular, they must work as
+   formal parameters in a LAMBDA and on the left-hand side of a SET!.
+   In the current implementation, generated identifiers are
+   implemented as vectors of the form #(<MARKER> symbol number), but
+   this could be easily changed to be some other data type.  (An
+   advantage of using vectors is that they then have a portable
+   representation for use with READ and WRITE.  This feature is not
+   currently exploited, but it might be useful for certain
+   bootstrapping purposes.)
+
+2. WITH-ALIASES special form
+
+   (WITH-ALIASES keyword uid body ...)
+
+   This should evaluate body in an environment in which every name of
+   the form #(<MARKER> x uid) denotes the binding of x in keyword's
+   environment of definition.
+
+Both of these features are supported by the interpreter.
+
+--------------------
+
+Random note:
+
+For speedier execution of the expander, at the expense of output
+that's more verbose and harder to read, do
+
+   (set-clean?! #f)
+
+This disables two features of the expander:
+
+  1. Reverting generated names to ordinary names when possible.
+
+  2. Suppressing production of WITH-ALIASES forms when it is not
+     needed.  (Often this becomes unneeded as a result of (1).)
+
+CONTAINS-GENERATED? implements the heuristic for accomplishing feature
+#2.  It's not reliable in the sense of removing the WITH-ALIASES
+whenever possible, but it always produces correct output.
+Unfortunately, using this routine increases the computational
+complexity of the expansion algorithm to be the same as that of
+Kohlbecker's.  This is why it's disabled in non-clean mode.  The
+complexity problem could be dixed, though, by just putting a depth
+bound on its search, failing if the input exceeds some fixed size.
+
+--------------------
+
+On the implementation of QUOTE:
+
+The treatment of QUOTE is somewhat interesting.  Consider the
+following:
+
+    (tst '(define-syntax foo (syntax-rules () ((foo x) '(a x)))))
+
+As you would expect (according to the Kohlbecker algorithm mind-set),
+the generated names that the hygiene algorithm introduces into the
+macro expansion are removed when a quoted form gets evaluated:
+
+    (set-clean?! #f)
+
+    (ex '(foo (b c)))
+      => '(with-aliases foo 12
+	    (#(<marker> quote 12) (#(<marker> a 12) (b c))))
+
+    (tst (ex '(foo (b c)))) => '(a (b c))
+
+In "clean mode", the expander will also take care of this.
+
+    (set-clean?! #t)
+
+    (ex '(foo (b c))) => ''(a (b c))
+
+The process is accomplished by the implementation's DESYNTAXIFY
+procedure.  The evaluator must memoize the result of the output in
+order for QUOTE to have corrrect semantics.  Consider this example:
+
+    (let-syntax ((mumble (syntax-rules () ((mumble) '(a b c)))))
+      (let ((f (lambda () (mumble))))
+        (eq? (f) (f))))
+
+The two calls to F must both return the same (with respect to EQ?)
+list constant.  (I don't think that the Scheme report is very clear on
+this point, but I could be wrong.  In any case, it's a behavior that
+most people expect.)  Without memoization, DESYNTAXIFY would be called
+twice, resulting in two different constants.
+
+--------------------
+
+To load into Scheme 48:
+
+Scheme 48 has multiple return values and a table package (also an
+ERROR procedure) all built in, so do not load values.scm or table.scm.
+Instead of loading them, do this:
+
+   ,open table
+
+To make sure ERROR is defined, do the following:
+
+   ,open signals
+
+The program is also set up to exploit the Scheme 48 module system, if
+desired.  To run it this way, do the following:
+
+   ,load-config for-s48.scm
+
+   ,open top
+
+and answer y when it asks whether it should load that package.  There
+will be a warning about NAME? being undefined, which you can safely
+ignore.

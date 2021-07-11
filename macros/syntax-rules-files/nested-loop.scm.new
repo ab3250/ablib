@@ -1,0 +1,41 @@
+(define-syntax nloop*
+  ;; Nested numerical loop
+  (syntax-rules ()
+    [(_ () form ...)
+     (begin form ...
+            (values))]
+    [(_ ((variable lower-inclusive upper-exclusive) more ...) form ...)
+     (let loop ([variable lower-inclusive])
+       (if (< variable upper-exclusive)
+           (begin
+             (nloop* (more ...) form ...)
+             (loop (+ variable 1)))
+           (values)))]
+    [(_ ((variable start-inclusive end-exclusive step) more ...) form ...)
+     (let ([cmp? (if (>= step 0) < >)])
+       (let loop ([variable start-inclusive])
+         (if (cmp? variable end-exclusive)
+             (begin
+               (nloop* (more ...) form ...)
+               (loop (+ variable step)))
+             (values))))]))
+
+
+
+;;;;;
+;(nloop* ((i 0 10))
+;    (display i))
+;
+
+;(nloop* ((i 0 10)
+;           (j 20 0 -4))
+;    (display (list i j)))
+
+(nloop* ((i 0 3)
+         (j 0 3)
+         (z 0 3))
+    (display (list i j z))(newline))
+
+
+
+

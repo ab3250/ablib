@@ -1,0 +1,985 @@
+proposal
+Robert Hieb & Kent Dybvig
+90/10/07
+modified 91/01/02
+modified 91/02/01
+
+Preface
+
+Here is the macro proposal at long last.  We believe that we have
+worked out the finer points of the proposal, and we have generated a
+complete working "reference implementation" of the entire proposal.
+The remainder of this preface discusses a set of issues that we wish to
+bring to your attention.  We do not intend for this preface to become a
+part of the R^4RS appendix.  Please look over the preface, the proposal
+itself, and if you are so inclined, the reference implementation
+(instructions follow), and direct your comments back to the group.  The
+proposal itself follows Will's earlier proposal, and some of his
+wording still remains.  We have omitted the section on "history,
+acknowledgements, and self-congratulations"; it should be included, but
+we didn't feel like taking the time to update it before sending out
+this proposal.
+
+* Reference implementation
+
+The reference implementation is available via anonymous ftp from
+iuvax.cs.indiana.edu in the directory pub/scheme/r4rs-syntax.  The file
+pub/scheme/r4rs-syntax/ReadMe contains instructions for using the
+implementation.  The file pub/scheme/r4rs-syntax/implementation-notes
+contains a brief, high-level description of the implementation.
+
+* Syntax literals
+
+A strict distinction between identifiers and symbols is enforced by the
+proposed macro system.  If an identifier is to be used as an expression
+in the output of a transformer, it must be introduced via SYNTAX
+rather than QUOTE.  Syntax objects are also created implicitly for
+the input to a macro transformer.  Syntax objects contain information
+not only about the structure of the syntax but also about the bindings
+for identifiers found within the object.  A structured syntax object
+may be "unwrapped" into a more traditional representation in terms of
+its components.
+
+* Hygienic low-level
+
+The low-level system, as well as the high-level system, is hygienic.
+Hygiene is fully automatic and impossible to avoid within the proposal,
+although implementations can certainly provide ways to break hygiene.
+
+* Scoping
+
+With the introduction of syntax literals and the notion of unwrapping,
+we have found it straightforward and natural for transformer
+expressions to be scoped where they appear rather than in a top-level
+transformer environment.  It is an error for a transformer to reference
+variables bound in the program being expanded, although it can refer to
+local keywords and it can insert references to both local variables and
+keywords into its expansion.  This means that the low-level system is
+referentially transparent, as is the high-level system.
+
+* FREE-IDENTIFIER=? vs. BOUND-IDENTIFIER=?
+
+We have discovered that one flavor of IDENTIFIER=? is not sufficient.
+(Nor was it under earlier proposals.)  There are now two flavors:
+FREE-IDENTIFIER=?, which tests whether its arguments have the same
+binding, and BOUND-IDENTIFIER=?, which tests whether they would be
+considered equivalent if bound, say, by a lambda expression.  We
+found that BOUND-IDENTIFIER=? is necessary to implement SYNTAX-RULES,
+and it's useful for checking for duplicate parameter names in LAMBDA
+as well.  Earlier versions of IDENTIFIER=? were equivalent to
+FREE-IDENTIFIER=?.
+
+* Wandering SYNTAX-RULES
+
+We have removed the TRANSFORMER syntactic form and untethered the
+SYNTAX-RULES form somewhat.  TRANSFORMER was used to determine
+when to switch from the local environment to the top-level transformer
+environment; we no longer switch so it's no longer necessary.
+SYNTAX-RULES may be used anywhere within a rhs of a LET-SYNTAX,
+LETREC-SYNTAX, or DEFINE-SYNTAX form.  This allows SYNTAX-RULES
+to be a "mere macro", i.e., the expander need not even know it
+exists, and it allows implementations to experiment with extensions
+that allow the use of local variables, e.g., help routines, within
+SYNTAX-RULES forms, such as "with" forms and "fenders".  (We have
+experimented with adding "with" and fenders to SYNTAX-RULES, but have
+yet to find anything that pleases us.)
+
+* Internal DEFINE-SYNTAX
+
+The reference implementation (but not this proposal) allows
+DEFINE-SYNTAX forms to be intermingled with internal definitions.  The
+combination allows macros be expand into references to the defined
+variables, while allowing the rhs expressions for the definitions to be
+written in terms of the macros.  This can be done less conveniently
+in the proposal as written by introducing the bindings first, then
+the macros using LET-SYNTAX or LETREC-SYNTAX, then the values using
+SET!.
+
+* SYNTAX-ERROR
+
+We have included in the low level macro facility everything needed to
+define the high level facility, i.e., SYNTAX-RULES,  The most
+controversial low-level procedure is likely to be SYNTAX-ERROR, which
+is supposed to signal an error (or generate code that will signal an
+error) given an explanatory message and an offending piece of syntax.
+We feel that this is important enough and simple enough that it should
+be in the proposal.  Without it, SYNTAX-RULES cannot be written within
+the low-level system proper.  We are also encouraging macro writers and
+implementors to write macros and macro systems in such a way that as
+many syntax errors as can be reported are reported during expansion; if
+we don't include SYNTAX-ERROR specified as it is, we can't do this.
+
+* Problems with DO, COND, and CASE in Section 7.3 of R^3.99RS
+
+(This is really a note to the editor.)  The derivations for DO,
+COND, and CASE in Section 7.3 do not match the descriptions given
+earlier in the report.   The derivation for DO can generate an
+invalid BEGIN expression (no subexpressions).  The derivations
+for COND and CASE accept empty COND and CASE expressions, i.e.,
+(COND), (CASE e).  Neither of us were aware that these were invalid
+until we noticed that Will's code disallowed empty COND and CASE
+expressions; has this always been the case?
+
+* First-class identifiers!?!
+
+Q: What's wrong with the following program?
+
+   (let-syntax ((alpha (let-syntax ((beta (syntax-rules ()
+                                             ((beta x ...) (list 'x ...)))))
+                          (lambda (x) `(,(syntax beta) 0)))))
+      (alpha))
+
+A: (alpha) expands into (beta 0), but in the context where the
+expansion is placed, beta isn't defined.  The reference implementation
+complains.  However, an earlier version of our implementation carried
+sufficient information around with the identifier beta that it was able
+to expand beta "properly" wherever it occurred.  In effect, we had
+created "first-class identifiers".  Unfortunately, first-class macro
+keywords make some sense, but first-class variables do not, and
+supporting compile-file would be a nightmare.  So we backed off.  It's
+an interesting concept, though.
+
+One correct way to write the above example, by the way, is:
+
+   (let-syntax ((beta (syntax-rules () ((beta x ...) (list 'x ...)))))
+      (let-syntax ((alpha (lambda (x) `(,(syntax beta) 0))))
+         (alpha)))
+
+
+Kent and Bob
+
+---------------------------------------------------
+---------------------------------------------------
+---------------------------------------------------
+---------------------------------------------------
+
+
+SCHEME WITH MACROS.
+
+Overview.
+
+The macro system consists of a convenient pattern language that makes
+it easy to write most macros, together with a compatible low-level
+macro facility for writing macros that cannot be expressed by the
+pattern language.
+
+There are no reserved identifiers.  Local keyword bindings may shadow
+variable bindings, and local variable bindings may shadow keyword
+bindings.  Both the high-level and low-level macro facilities are
+``hygienic'' and ``referentially transparent'':
+
+  * If a macro inserts a binding for an identifier (variable or
+    keyword), the identifier is automatically renamed to avoid
+    conflicts with other identifiers.
+
+  * If a macro inserts a free reference to an identifier, the
+    identifier refers to the binding that was visible to the definition
+    of the macro, regardless of any local bindings that may surround
+    the use of the macro.
+
+The low-level facility may be used to implement the high-level
+facility.
+
+
+Syntax.
+
+Macros are added to Scheme by adding DEFINE-SYNTAX, LET-SYNTAX,
+LETREC-SYNTAX, SYNTAX, and SYNTAX-RULES to the syntax in section 7.1 as
+follows:
+
+    <expression>  ::=  <variable>
+                    |  <literal>
+                    |  <syntax literal>
+                    |  <procedure call>
+                    |  <lambda expression>
+                    |  <conditional>
+                    |  <assignment>
+                    |  <derived expression>
+                    |  <macro application>
+                    |  <macro block>
+
+    <syntax literal>  ::=  (syntax <datum>)
+
+    <macro application>  ::=  (<keyword> <datum>*)
+
+    <keyword>  ::=  <identifier>
+
+    <macro block>  ::=  (let-syntax (<syntax spec>*) <body>)
+                     |  (letrec-syntax (<syntax spec>*) <body>)
+
+    <syntax spec>  ::=  (<keyword> <transformer>)
+
+    <transformer>  ::=  <expression>
+
+    <derived expression>  ::=  <all the derived expressions from 7.1.3>
+                            |  (syntax-rules (<pattern identifier>*)
+                                  (<pattern> <template>)*)
+
+    <pattern>  ::=  <pattern identifier>
+                 |  (<pattern>*)
+                 |  (<pattern>+ . <pattern>)
+                 |  (<pattern>* <pattern> ...)
+
+    <template>  ::=  <pattern identifier>
+                  |  <template datum>
+                  |  (<template>*)
+                  |  (<template element>*)
+                  |  (<template element>+ . <template>)
+
+    <template element>  ::=  <template>
+                          |  <template> ...
+
+    <template datum>  ::=  <vector>
+                        |  <string>
+                        |  <character>
+                        |  <boolean>
+                        |  <number>
+
+    <pattern identifier> ::= <any identifier except ...>
+
+    <program>  ::=  <program form>*
+
+    <program form>  ::=  <command>
+                      |  <definition>
+                      |  <syntax definition>
+
+    <syntax definition>  ::=  (define-syntax <keyword> <transformer>)
+                           |  (begin <syntax definition>*)
+
+We assume that a program contains no more than one <definition> or
+<syntax definition> of any identifier.
+
+The macro system also adds the following procedures:
+BOUND-IDENTIFIER=?, FREE-IDENTIFIER=?, IDENTIFIER?, IDENTIFIER->SYMBOL,
+GENERATE-IDENTIFIER, UNWRAP-SYNTAX, and SYNTAX-ERROR.
+
+
+Semantics.
+
+Evaluation of a program proceeds in two logical steps:  first, the
+program is converted into an intermediate language via macro-expansion,
+then the result of macro expansion is evaluated.  When it is necessary
+to distinguish evaluation in this restricted sense from the full
+evaluation process, it is referred to as ``execution.''
+
+Syntax definitions, either lexical or global, cause an identifier to be
+treated as a keyword within the scope of the binding.  The keyword is
+associated with a transformation procedure, which may be created
+implicitly using the pattern-matching language of SYNTAX-RULES or
+explicitly using the low-level facilities.
+
+Since the transformation procedure must be fully evaluated during the
+course of expansion, it is necessary to specify the environment in
+which this evaluation takes place.  A transformation procedure is
+expanded in the same environment as that in which the program is being
+expanded, but is executed in an environment that is distinct from the
+environment in which the program is executed.  This execution
+environment distinction is important only for the resolution of global
+variable references and assignments.  In what follows, the environment
+in which transformers are executed is called the standard transformer
+environment and is assumed to be a standard R^4RS environment.
+
+Since part of the task of hygienic macro expansion is to resolve
+identifier references, the fact that transformers are expanded in the
+same environment as the program means that identifier bindings in the
+program can shadow identifier uses within transformers.  Since variable
+bindings in the program are not available at the time the transformer
+is executed, it is an error for a transformer to reference or assign
+them.  However, since keyword bindings are available during expansion,
+lexically visible keyword bindings from the program may be used in
+macro applications in a transformer.
+
+When a macro application is encountered, the transformation procedure
+associated with the macro keyword is applied to a representation of the
+macro application.  The result returned by the transformation procedure
+replaces the original macro application and is expanded once again.
+Thus, macro expansions may themselves be or contain macro applications.
+
+
+(LET-SYNTAX <bindings> <body>)                              syntax
+
+Syntax: <Bindings> should have the form
+
+    ((<keyword> <transformer>) ...)
+
+where each <keyword> is an identifier, each <transformer> is an
+<expression>, and <body> is a sequence of one or more expressions.  It
+is an error for a <keyword> to appear more than once in the list of
+keywords being bound.
+
+Semantics: Each <transformer> is expanded in the syntactic environment
+of the LET-SYNTAX expression and executed in the standard transformer
+environment to yield a transformation procedure.  The body of the
+LET-SYNTAX expression is expanded in the syntactic environment obtained
+by extending the syntactic environment of the LET-SYNTAX expression by
+binding the <keyword>s to the transformation procedures.
+
+Examples:
+
+    (let-syntax ((when (syntax-rules ()
+                          ((when test stmt1 stmt2 ...)
+                            (if test (begin stmt1 stmt2 ...))))))
+       (let ((if #t))
+          (when if (set! if 'now))
+          if))                              -->  now
+
+    (let ((x 'outer))
+       (let-syntax ((m (syntax-rules () ((m) x))))
+          (let ((x 'inner))
+             (m))))                          -->  outer
+
+
+(LETREC-SYNTAX <bindings> <body>)                        syntax
+
+Syntax: Same as for LET-SYNTAX.
+
+Semantics: Each <transformer> is expanded in an extended syntactic
+environment and executed in the standard transformer environment.  The
+extended syntactic environment is defined recursively as the syntactic
+environment of the LETREC-SYNTAX expression extended by bindings for
+the <keyword>s to the transformation procedures.  It is an error for
+the macro-expansion of any <transformer> to require the binding of any
+<keyword>.
+
+Example:
+
+    (letrec-syntax ((or (syntax-rules ()
+                           ((or) #f)
+                           ((or e) e)
+                           ((or e1 e2 e3 ...)
+                            (let ((temp e1))
+                               (if temp temp (or e2 e3 ...)))))))
+       (let ((x #f)
+             (y 7)
+             (temp 8)
+             (let odd?)
+             (if even?))
+          (or x (let temp) (if y) y)))        -->  7
+
+
+(DEFINE-SYNTAX <keyword> <transformer>)                   syntax
+
+Syntax: The <keyword> is an identifier, and the <transformer> is an
+<expression>.
+
+Semantics: The top-level syntactic environment is extended by binding
+the <keyword> to the procedure obtained by expanding the <transformer>
+in the environment of the DEFINE-SYNTAX form and then executing the
+result in the standard transformer environment.
+
+It is an error for the macro-expansion of the <transformer> to require
+the binding of <keyword>.
+
+Example:
+
+    (define-syntax let*
+       (syntax-rules ()
+          ((let* () body1 body2 ...)
+           (let () body1 body2 ...))
+          ((let* ((name1 val1) (name2 val2) ...) body1 body2 ...)
+           (let ((name1 val1))
+              (let* ((name2 val2) ...) body1 body2 ...)))))
+
+
+(SYNTAX-RULES <literals> <syntax rule> ...)                syntax
+
+Syntax: <Literals> is a list of identifiers, and each <syntax rule> is
+a list consisting of a pattern and a template (see Section 7.1).
+
+Semantics:  A SYNTAX-RULES form yields a procedure that attempts to
+match a macro application against the patterns contained in the
+<syntax rule>s, beginning with the leftmost <syntax rule>.  When a
+match is found, the macro application is rewritten according to the
+template.
+
+An identifier that appears in the pattern of a <syntax rule> is a
+pattern variable, unless it is listed in <literals> or is the
+identifier ... .  Pattern variables match arbitrary input elements and
+are used to refer to elements of the input in the template.  It is an
+error for the same pattern variable to appear more than once in a
+pattern.
+
+Identifiers that occur in <literals> are interpreted as literal
+identifiers to be matched against corresponding subforms of the input.
+A subform in the input matches a literal identifier if and only if it
+is an identifier and either both its occurrence in the macro
+application and its occurrence in the macro definition have the same
+lexical binding, or both have no lexical binding.
+
+A subpattern followed by ... can match zero or more elements of the
+input.  It is an error for ... to appear in <literals>, and a ... can
+appear in a pattern only following the last element of a nonempty list
+of subpatterns.
+
+More formally, an input form F matches a pattern P if and only if:
+
+  (1) P is a pattern variable; or
+
+  (2) P is a literal identifier and F is an identifier with the same
+      binding; or
+
+  (3) P is a pattern list (P_1 ... P_n) and F is a proper list of N
+      forms that match P_1 through P_n, respectively; or
+
+  (4) P is an improper pattern list (P_1 ... P_n . P_n+1) and F is an
+      improper list of N forms that match P_1 through P_n,
+      respectively, and whose last ``cdr'' matches P_n+1; or
+
+  (5) P is a pattern list of the form (P_1 ... P_n P_n+1 ...) and F is
+      a proper list of at least N elements, the first N of which match
+      P_1 through P_n, respectively, and the remainder of which match
+      P_n+1.
+
+It is an error if a use of the macro does not match any of the
+patterns.
+
+When a macro application is rewritten according to the template of the
+matching <syntax rule>, pattern variables that occur in the template
+are replaced by the subforms they match in the input.  Pattern
+variables that occur in subpatterns followed by one or more instances
+of ... can occur only in subtemplates that are followed as many
+instances of ... .  They are replaced in the output by all of the
+subforms they match in the input, distributed as indicated.  It is an
+error if the output cannot be built up as specified.
+
+%%% This description of output construction is very vague.  It should
+%%% probably be formalized, but that is not easy...
+
+Identifiers that appear in the template but are not pattern variables
+or ... are inserted into the output as literal identifiers.  If a
+literal identifier is inserted as a free identifier it refers to the
+closest lexical binding at the point the SYNTAX-RULES form appeared.
+If a literal identifier is inserted as a bound identifier it is renamed
+to prevent inadvertent capturing of free identifiers from the input.
+
+Examples:
+
+    (define-syntax let
+       (syntax-rules ()
+          ((let ((name val) ...) body1 body2 ...)
+          ((lambda (name ...) body1 body2 ...) val ...))
+          ((let tag ((name val) ...) body1 body2 ...)
+           ((letrec ((tag (lambda (name ...) body1 body2 ...)))
+               tag)
+             val ...))))
+
+    (define-syntax cond
+       (syntax-rules (else =>)
+          ((cond (else result1 result2 ...))
+           (begin result1 result2 ...))
+          ((cond (test => result))
+           (let ((temp test))
+              (if temp (result temp))))
+          ((cond (test => result) clause1 clause2 ...)
+           (let ((temp test))
+              (if temp
+                  (result temp)
+                  (cond clause1 clause2 ...))))
+          ((cond (test)) test)
+          ((cond (test) clause1 clause2 ...)
+           (or test (cond clause1 clause2 ...)))
+          ((cond (test result1 result2 ...))
+           (if test (begin result1 result2 ...)))
+          ((cond (test result1 result2 ...) clause1 clause2 ...)
+           (if test
+               (begin result1 result2 ...)
+               (cond clause1 clause2 ...)))))
+
+    (let ((=> #f))
+       (cond (#t => 'ok)))           --> ok            
+
+The last example is not an error because the local binding for =>
+creates a new identifier that is distinct from the top level identifier
+=> that the transformer for COND looks for.  Thus, rather than
+expanding into:
+
+   (let ((=> #f))
+      (let ((temp #t))
+         (if temp ('ok temp))))
+
+which would result in an invalid application, it instead generates the
+valid program:
+
+   (let ((=> #f))
+      (if #t (begin => 'ok)))
+
+
+Transformation procedures.
+
+Although the high-level macro constructor SYNTAX-RULES is the preferred
+tool for creating syntax definitions, other lower-level tools are
+provided to allow the programmer to define more complex macros.  In
+fact, SYNTAX-RULES itself can be defined as a macro using the low-level
+facilities.
+
+The syntactic representation passed to a transformation procedure
+encapsulates information about the structure of the represented form
+and the bindings of the identifiers it contains.  These syntax objects
+can be traversed and examined using the procedures described below.
+The output of a transformation procedure may be built up using the
+usual Scheme list constructors, combining pieces of the input with new
+syntactic structures.
+
+
+(SYNTAX <datum>)                                           syntax
+
+Syntax: The <datum> may be any external representation of a Scheme
+object.
+
+Semantics: SYNTAX is the syntactic analogue of QUOTE.  It creates a
+syntactic representation of <datum> that, like an argument to a
+transformation procedure, contains information about the bindings for
+identifiers contained in <datum>.  The binding for an identifier
+introduced by SYNTAX is the closest lexically visible binding.  All
+variables and keywords introduced by transformation procedures must be
+created by SYNTAX; it is an error to insert a symbol in the output of a
+transformation procedure unless it is to be part of a quoted datum.
+
+     (symbol? (syntax x))                               --> #f
+     (let-syntax ((car (lambda (x) (syntax car))))
+        ((car) '(0)))                                   --> 0
+     (let-syntax ((quote-quote (lambda (x) (list (syntax quote) 'quote))))
+        (quote-quote))                                  --> quote
+     (let-syntax ((quote-quote (lambda (x) (list 'quote 'quote))))
+        (quote-quote))                                  --> ERROR
+
+The second QUOTE-QUOTE example results in an error because two raw
+symbols are being inserted in the output.  The quoted QUOTE in the
+first QUOTE-QUOTE example does not cause an error because it will
+be a quoted datum.
+
+     (let-syntax ((quote-me (lambda (x)
+                               (list (syntax quote) x))))
+        (quote-me please))                              --> (quote-me please)
+     (let ((x 0))
+        (let-syntax ((alpha (lambda (e) (syntax x))))
+           (alpha)))                                    --> 0
+     (let ((x 0))
+        (let-syntax ((alpha (lambda (x) (syntax x))))
+           (alpha)))                                    --> ERROR
+     (let-syntax ((alpha
+                   (let-syntax ((beta
+                                 (syntax-rules ()
+                                    ((beta) 0))))
+                      (lambda (x) (syntax (beta))))))
+        (alpha))                                        --> ERROR
+
+
+The last two examples are errors because in both cases a lexically
+bound identifier is placed outside of the scope of its binding, in the
+first case, the variable "x", and in the second case, the keyword
+"beta".
+
+     (let-syntax ((alpha (syntax-rules () ((alpha) 0))))
+        (let-syntax ((beta (lambda (x) (alpha))))
+           (beta)))                                     --> 0
+
+     (let ((list 0))
+        (let-syntax ((alpha (lambda (x) (list 0))))
+           (alpha)))                                    --> ERROR
+
+The last example is an error because the reference to "list" in the
+transformer is shadowed by the lexical binding for "list".  Since the
+expansion process is distinct from the final evaluation of the program,
+transformers cannot reference program variables.  On the other hand,
+the previous example is not an error because definitions for keywords
+in the program do exist at expansion time.
+
+
+(IDENTIFIER? syntax-obj)                                   procedure
+
+Returns #t if "syntax-obj" represents an identifier, otherwise returns
+#f.
+
+    (identifier? (syntax x))       --> #t
+    (identifier? (quote x))        --> #f
+    (identifier? 3)                --> #f
+
+
+(UNWRAP-SYNTAX syntax-obj)                                 procedure
+
+If "syntax-obj" is an identifier, it is returned unchanged.  Otherwise,
+UNWRAP-SYNTAX converts the outermost structure of "syntax-obj" into a
+data object whose external representation is the same as that of
+"syntax-obj".  The result is either an identifier, a pair whose ``car''
+and ``cdr'' are syntax objects, a vector whose elements are syntax
+objects, an empty list, a string, a boolean, a character, or a number.
+
+    (identifier? (unwrap-syntax (syntax x)))            --> #t
+    (identifier? (car (unwrap-syntax (syntax (x)))))    --> #t
+    (unwrap-syntax (cdr (unwrap-syntax (syntax (x)))))  --> ()
+
+
+(FREE-IDENTIFIER=? id_1 id_2)                               procedure
+
+Returns #t if the original occurrences of "id_1" and "id_2" have
+the same binding, otherwise returns #f.  FREE-IDENTIFIER=?
+is used to look for a literal identifier in the argument to a
+transformation procedure, such as ELSE in a COND clause.  A macro
+definition for SYNTAX-RULES would use FREE-IDENTIFIER=? to look for
+literals in the input.
+
+
+    (free-identifier=? (syntax x) (syntax x))         --> #t
+    (free-identifier=? (syntax x) (syntax y))         --> #f
+    (let ((x (syntax x)))
+       (free-identifier=? x (syntax x)))              --> #f
+    (let-syntax ((alpha (lambda (x)
+                           (free-identifier=? (car (unwrap-syntax x))
+                                              (syntax alpha)))))
+       (alpha))                                       --> #f
+    (letrec-syntax ((alpha (lambda (x)
+                              (free-identifier=? (car (unwrap-syntax x))
+                                                 (syntax alpha)))))
+       (alpha))                                       --> #t
+
+
+(BOUND-IDENTIFIER=? id_1 id_2)                              procedure
+
+Returns #t if a binding for one of the two identifiers "id_1" and
+"id_2" would shadow free references to the other, otherwise returns
+#f.  Two identifiers can be FREE-IDENTIFIER=? without being
+BOUND-IDENTIFIER=?  if they were introduced at different stages in the
+expansion process.  BOUND-IDENTIFIER=? can be used, for example, to
+detect duplicate identifiers in bound-variable lists.  A macro
+definition of SYNTAX-RULES would use BOUND-IDENTIFIER=? to look for
+pattern variables from the input pattern in the output template.
+
+    (bound-identifier=? (syntax x) (syntax x))         --> #t
+    (letrec-syntax ((alpha (lambda (x)
+                              (bound-identifier=? (car (unwrap-syntax x))
+                                                  (syntax alpha)))))
+       (alpha))                                        --> #f
+    (letrec-syntax ((alpha (lambda (x)
+                              (let ((a (car (unwrap-syntax x)))
+                                    (b (syntax alpha)))
+                                 (and (free-identifier=? a b)
+                                      (not (bound-identifier=? a b)))))))
+       (alpha))                                        --> #t
+
+
+(IDENTIFIER->SYMBOL id)                                     procedure
+
+Returns a symbol representing the original name of "id".
+IDENTIFIER->SYMBOL is used to examine identifiers that appear in
+literal contexts, i.e., identifiers that will appear in quoted
+structures.
+
+     (symbol? (identifier->symbol (syntax x)))   --> #t
+     (identifier->symbol (syntax x))             --> x 
+
+
+(GENERATE-IDENTIFIER)                                        procedure
+(GENERATE-IDENTIFIER string)                                 procedure
+
+Returns a new identifier.  GENERATE-IDENTIFIER is
+used to introduce bound identifiers into the output of a transformation
+procedure.  Since introduced bound identifiers are automatically
+renamed, GENERATE-IDENTIFIER is necessary only for distinguishing
+introduced identifiers when an indefinite number of them must be
+generated by a macro.
+
+    (identifier->symbol (generate-identifier 'x))  --> x
+    (identifier->symbol (generate-identifier))     --> unspecified
+    (bound-identifier=? (generate-identifier 'x)
+                        (generate-identifier 'x))  --> #f
+    (define-syntax set*!
+       ; (set*! (<identifier> <expression>) ...)
+       (lambda (x)
+          (letrec ((unwrap-exp (lambda (x)
+                                  (let ((x (unwrap-syntax x)))
+                                     (if (pair? x)
+                                         (cons (car x) (unwrap-exp (cdr x)))
+                                         x)))))
+             (let ((sets (map unwrap-exp (cdr (unwrap-exp x)))))
+                (let ((ids (map car sets))
+                      (vals (map cadr sets))
+                      (temps (map (lambda (x) (generate-identifier)) sets)))
+                   `(,(syntax let) ,(map list temps vals)
+                          ,@(map (lambda (id temp) `(,(syntax set!) ,id ,temp))
+                                 ids
+                                 temps)
+                          #f))))))
+
+
+(SYNTAX-ERROR string syntax-obj)
+
+Causes an error to be signaled at some point in the evaluation
+process.  "string" should be an explanatory message string; "syntax-obj"
+should be the offending syntactic object.  SYNTAX-ERROR may signal an
+error immediately or return a value that can be used to signal an error
+at some later point in the evaluation process.  Consequently, the value
+returned by SYNTAX-ERROR, if any, should be returned as all or part of
+the expansion of a macro application.  The supplied message
+and syntax object are used to construct an appropriate error message.
+
+Implementations may wish to issue a warning message for each syntactic
+error that occurs during the expansion process, while producing a
+well-formed expression that will signal a run-time error if executed.
+
+   (define-syntax zero
+      (lambda (x)
+         (if (null? (unwrap-syntax (cdr (unwrap-syntax x))))
+             0
+             (syntax-error "no subexpressions expected" x))))
+
+   (zero)      --> 0
+   (zero 0)    --> ERROR
+
+(define-syntax when
+   (lambda (x)
+      (letrec ((unwrap-exp (lambda (x)
+                              (let ((x (unwrap-syntax x)))
+                                 (if (pair? x)
+                                     (cons (car x) (unwrap-exp (cdr x)))
+                                      x))))
+               (check-exp (lambda (x n)
+                             (if (= n 0)
+                                 (null? x)
+                                 (and (pair? x)
+                                      (check-exp (cdr x) (- n 1)))))))
+         (let ((x (unwrap-exp x)))
+            (cond
+               ((and (check-exp x 4)
+                     (identifier? (caddr x))
+                     (free-identifier=? (caddr x) (syntax =>)))
+                `(,(syntax let) ((,(syntax test-var) ,(cadr x)))
+                     (,(syntax if) ,(syntax test-var)
+                                   (,(cadddr x) ,(syntax test-var))
+                                   #f)))
+               ((and (check-exp x 3)
+                     (or (not (identifier? (caddr x)))
+                         (not (free-identifier=? (caddr x) (syntax =>)))))
+                `(,(syntax if) ,(cadr x) ,(caddr x) #f))
+               (else (syntax-error "invalid syntax" x)))))))
+
+This definition for WHEN is approximately equivalent to the following
+definition using syntax-rules:
+
+   (define-syntax when
+      (syntax-rules (=>)
+         ((when test action)
+          (if test action #f))
+         ((when test => action)
+          (let ([test-var test]) (if test-var (action test-var) #f)))))
+
+The difference (aside from readability) is that something of the form
+(WHEN test =>) is an error in the former definition.  If the check for
+the presence of ``=>'' were left out of the second COND clause of the
+former definition, the two definitions would be equivalent.
+
+
+Internal definitions.
+
+Although macros may expand into definitions in any context that permits
+definitions, it is an error for a definition to shadow a syntactic
+keyword whose meaning is needed to determine whether some definition in
+the group of top-level or internal definitions that contains the
+shadowing definition is in fact a definition, or is needed to determine
+the boundary between the group and the expressions that follow the
+group.  For example, the following are errors:
+
+    (define define 3)
+
+    (let-syntax ((foo (syntax-rules ()
+                        ((foo (proc args ...) body ...)
+                         (define proc (lambda (args ...) body ...))))))
+      (let ((x 3))
+        (foo (plus x y) (+ x y))
+        (define foo x)
+        (plus foo x)))
+
+
+Addendum.
+
+This final section is not meant for inclusion in the report, since it
+goes beyond what it necessary for a minimal macro system, and the
+facilities described are tentative.  Since they can be defined as
+macros using the minimal system described above, they do not add any
+power to the system, but do add considerable convenience to the lower
+levels and demonstrate that it is possible to provide mid-level
+facilities.
+
+Such facilities are necessary because the smooth degradation from the
+high-level pattern matching to low-level S-expression manipulation
+possible using EXTEND-SYNTAX with fenders and WITH has been lost in the
+above macro system.  We have yet to find an aesthetically pleasing
+way to incorporate fenders and WITH bindings into SYNTAX-RULES.
+
+
+(QUASISYNTAX <template>)                                 syntax
+
+Syntax: like QUASIQUOTE.
+
+Semantics:  QUASISYNTAX is to SYNTAX as QUASIQUOTE is to QUOTE.  As in
+a QUASIQUOTE form, an UNQUOTE form internal to a QUASISYNTAX form is
+evaluated and inserted into the structure, and an UNQUOTE-SPLICING form
+is evaluated and spliced into the structure.  The distinction is that
+all parts of the template that are not ``unquoted'' are treated as
+SYNTAX expressions rather than QUOTE expressions.
+
+
+(SYNTAX-CASE (<variable> <init>) <clause> ...)
+
+Syntax: Each <clause> should be of the form:
+
+    (<pattern> <result>)
+
+or:
+
+    (<pattern> <fender> <result>).
+
+The last clause may be an ELSE clause of the form:
+
+    (ELSE <result>).
+
+<init>, <fender> and <result> are expressions.  <variable> must be a
+valid identifier.  A <pattern> must look like:
+
+    <pattern> ::= <identifier>
+                | #t
+                | (<pattern>*)
+                | (<pattern>+ . <pattern>)
+                | (<pattern>* <pattern> ...)
+                | #(<pattern>*)
+                | #(<pattern>* <pattern> ...)
+
+Semantics:  The <init> expression is evaluated and matched against the
+<pattern>s, from left to right.  The first <clause> whose <pattern>
+matches the value of <init> and that either has no fender or whose
+fender evaluates to a true value is selected, and its <result> is
+evaluated and returned as the result of the SYNTAX-CASE expression.  If
+there is an ELSE <clause> and no other <clause> is selected, then the
+ELSE <clause> is selected.  The result is unspecified if no clause is
+selected.
+
+Pattern matching is similar to that of SYNTAX-RULES, except that all
+<identifier>s are treated as literal identifiers, #t matches anything,
+and vector patterns are allowed.  A SYNTAX-RULES pattern can be
+converted into a SYNTAX-CASE pattern by replacing all pattern variables
+with #t.
+
+Within a <fender> or a <result>, <variable> is bound to an expression
+that is ``unwrapped'' to the level matched by the pattern.
+
+The following definition is equivalent to the preceding low-level
+definition of WHEN:
+
+(define-syntax when
+   (lambda (x)
+      (syntax-case (x x)
+         ((when #t #t)
+          (or (not (identifier? (caddr x)))
+              (not (free-identifier=? (caddr x) (syntax =>))))
+          (quasisyntax (if ,(cadr x) ,(caddr x) #f)))
+         ((when #t => #t)
+          (quasisyntax (let ((test-var ,(cadr x)))
+                          (if test-var
+                              (,(cadddr x) test-var)
+                              #f))))
+         (else (syntax-error "invalid syntax" x)))))
+
+
+Capturing
+
+The following capturing mechanism is powerful enough to support many
+common sorts of "nonhygienic" macros (macros not possible under fully
+automatic hygiene), yet respects the spirit of hygiene.  Macros created
+using it seem to "do the right thing." For instance, it allows
+structure macros or those of the "loop/exit" or "coroutine/resume"
+style.  The price for supporting this feature is that the complete
+expansion environment must be carried around with each identifier,
+which is not particularly onerous.
+
+(CONSTRUCT-IDENTIFIER id symbol)                           procedure
+
+CONSTRUCT-IDENTIFIER creates an identifier named by "symbol" that
+behaves as if it had been introduced where "id" was introduced.
+
+CONSTRUCT-IDENTIFIER is used to create identifiers that are implicitly
+present in a given expression, using an identifier that is present as a
+prototype.  For example, a structure definition facility might
+construct a field-accessor name that does not explicitly appear in the
+structure definition from some combination of the structure type and
+field names.  Since the name does not appear explicitly in the
+structure definition, an introduced binding for it would ordinarily be
+ineffective: the binding would not capture references to the name
+within the scope of the structure definition as intended.  In essence,
+CONSTRUCT-IDENTIFIER allows an identifier to serve as a shorthand for
+one or more constructed identifiers.  In the example, the structure
+name, in combination with the field name, serves as a shorthand for the
+field-accessor name.
+
+    (let ((x (syntax a)))
+       (bound-identifier=?
+          (construct-identifier x 'a)
+          x))                                         --> #t
+
+    (let ((x (syntax a)) (y (syntax b)))
+       (bound-identifier=?
+          (construct-identifier x 'b)
+          y))                                         --> #t
+
+    (define-syntax uncons
+       ; (uncons i v e)
+       (letrec ((unwrap-exp (lambda (x)
+                               (let ((x (unwrap-syntax x)))
+                                  (if (pair? x)
+                                      (cons (car x) (unwrap-exp (cdr x)))
+                                      x)))))
+          (lambda (x)
+             (let ((x (unwrap-exp x)))
+                (let ((i (cadr x)) (v (caddr x)) (e (cadddr x)))
+                   (let ((s (symbol->string (identifier->symbol i))))
+                      (let ((i-car (construct-identifier i
+                                     (string->symbol (string-append s "-car"))))
+                            (i-cdr (construct-identifier i
+                                     (string->symbol (string-append s "-cdr")))))
+                         `(,(syntax let) ((,(syntax t) ,v))
+                             (,(syntax let) ((,i-car ,(syntax (car t)))
+                                             (,i-cdr ,(syntax (cdr t))))
+                                ,e)))))))))
+    (uncons x '(a b c)
+       (list x-car x-cdr))                            --> (a (b c))
+    (let ([x-car 3])
+       (uncons x '(a b c)
+          (list x-car x-cdr)))                        --> (a (b c))
+    (uncons x '(a b c)
+       (let ([x-car 3])
+          (list x-car x-cdr)))                        --> (3 (b c))
+
+    (define-syntax recons
+       ; (recons i)
+       (letrec ((unwrap-exp (lambda (x)
+                               (let ((x (unwrap-syntax x)))
+                                  (if (pair? x)
+                                      (cons (car x) (unwrap-exp (cdr x)))
+                                      x)))))
+          (lambda (x)
+             (let ((x (unwrap-exp x)))
+                (let ((i (cadr x)))
+                   (let ((s (symbol->string (identifier->symbol i))))
+                      (let ((i-car (construct-identifier i
+                                     (string->symbol (string-append s "-car"))))
+                            (i-cdr (construct-identifier i
+                                     (string->symbol (string-append s "-cdr")))))
+                         `(,(syntax cons) ,i-car ,i-cdr))))))))
+    (uncons x '(a b c) (recons x))                    --> (a b c)
+    (let ((x-car 'a) (x-cdr '(b c)))
+       (recons x))                                    --> (a b c)
+
+    (define-syntax loop
+       (lambda (x)
+          (let ((x (unwrap-syntax x)))
+             (let ((exit-id (construct-identifier (car x) 'exit))
+                   (body (car (unwrap-syntax (cdr x)))))
+                `(,(syntax call/cc)
+                   (,(syntax lambda) (,exit-id)
+                      (,(syntax let) ,(syntax loop) ()
+                         ,body
+                         (,(syntax loop)))))))))
+    (loop (exit 'bye))                     --> bye
+    (let ((exit list))
+       (loop (exit 'bye)))                 --> bye
+    (loop (exit (let ((exit list))
+                   (exit 'bye))))          --> (bye)

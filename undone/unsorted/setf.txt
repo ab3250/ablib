@@ -1,0 +1,132 @@
+From oleg@pobox.com Tue Jul 07 16:18:18 1998
+Path: News.CoLi.Uni-SB.DE!news.phil.uni-sb.de!wuff.mayn.de!news-nue1.dfn.de!news-mue1.dfn.de!news-stu1.dfn.de!news-kar1.dfn.de!news-was.dfn.de!nntp-out.monmouth.com!newspeer.monmouth.com!nntp2.dejanews.com!nnrp1.dejanews.com!not-for-mail
+From: oleg@pobox.com
+Newsgroups: comp.lang.scheme
+Subject: setf -- a polymorphic, generic setter -- as a simple Scheme macro
+Date: Tue, 07 Jul 1998 16:18:18 GMT
+Organization: Deja News - The Leader in Internet Discussion
+Message-ID: <6nthoa$bvr$1@nnrp1.dejanews.com>
+Reply-To: oleg@pobox.com
+Summary: LISP's setf as a Scheme macro
+Keywords: polymorphism, setter, overloading, generic function, Scheme, LISP, macro
+X-Article-Creation-Date: Tue Jul 07 16:18:18 1998 GMT
+X-Http-User-Agent: Mozilla/4.05 (Macintosh; I; PPC, Nav)
+Xref: News.CoLi.Uni-SB.DE comp.lang.scheme:22273
+Xcanpos: shelf.ccd0/199807172201!0005604418
+
+This is to discuss how a LISP-like setf form can be used and
+implemented in Scheme. First, allow me to show a few examples of setf!
+usage:
+
+> (define al '((1 "one") (2 "two")))
+> (assv 1 al)
+(1 "one")
+> (setf! (cadr (assv 1 al)) "-one-")
+> (assv 1 al)
+(1 "-one-")
+> (setf! (car (assv 1 al)) 3)
+> (assv 1 al)
+#f
+> al
+((3 "-one-") (2 "two"))
+>
+
+> (define s (string-append "abcd" ""))
+> (string-ref s 1)
+#\b
+> (setf! (string-ref s 1) #\B)
+> s
+"aBcd"
+>
+
+> (define v (vector 1 2 '() ""))
+> (vector-ref v 2)
+()
+> (setf! (vector-ref v 2) (list (vector-ref v 3) 3))
+> v
+#(1 2 ("" 3) "")
+>
+
+        ; a more elaborate, and admittedly, contrived, example
+> (define tree #f)
+> (setf! tree '((a . b) . (c . (e . f))))
+
+(define (tree-ref tree . dirs)
+  (if (null? dirs) tree
+    (apply tree-ref (cons (if (car dirs) (cdr tree) (car tree)) (cdr dirs)))))
+
+(define (tree-set! tree dirval1 dirval2 . dirs)
+  (if (null? dirs) ((if dirval1 set-cdr! set-car!) tree dirval2)
+    (apply tree-set! (cons (if dirval1 (cdr tree) (car tree))
+                           (cons dirval2 dirs)))))
+
+> (tree-ref tree #f #f)
+a
+> (setf! (tree-ref tree #f #f) 'x)
+> (tree-ref tree #f #f)
+x
+> (tree-ref tree #f)
+(x . b)
+        ; the following prunes the tree
+> (setf! (tree-ref tree #f) 'leaf)
+> (tree-ref tree #f)
+leaf
+        ; and the following grows it back
+> (setf! (tree-ref tree #f) '((z . u) . v))
+> (tree-ref tree #f #f #t)
+u
+>
+
+
+The setf! form is implemented as a Scheme macro. The following table
+shows code re-writing it performs. The first column tells what one can
+enter, while the second column shows what actually is being executed
+by a Scheme system after macro expansion:
+
+(setf! (car L) V)         ==>   (set-car! L V)
+(setf! (cdr L) V)         ==>   (set-cdr! L V)
+(setf! (car (cdr L)) V)   ==>   (set-car! (cdr L) V)
+(setf! (cddr L)) V)       ==>   (set-cdr! (cdr L) V)
+
+(setf! (string-ref s i) c)   ==>   (string-set! s i c)
+(setf! (vector-ref v i) c)   ==>   (vector-set! v i c)
+
+In general,
+(setf! (ANYTHING-ref v ....) c)   ==>   (ANYTHING-set! v ... c)
+where ANYTHING is, well, anything - any combination of allowed characters.
+
+and (setf! X V)   ==>   (set! X V)
+
+
+The setf! form is implemented as follows (Gambit-C 3.0):
+
+; setf! - a polymorphic generic setter
+(define-macro (setf! F V)
+        ; symbol->string chopping off a trailing -ref if any
+  (define (-ref-less sym)
+    (let* ((str (symbol->string sym)) (suffix "-ref")
+           (s-pos (- (string-length str) (string-length suffix))))
+      (if (negative? s-pos) str
+        (let loop ((i 0))
+             (cond
+              ((>= i (string-length suffix)) (substring str 0 s-pos))
+              ((char=? (string-ref suffix i) (string-ref str (+ i s-pos)))
+               (loop (+ 1 i)))
+              (else str))))))
+
+  (if (not (pair? F)) `(set! ,F ,V)
+    (case (car F)
+          ((car) `(set-car! ,@(cdr F) ,V))
+          ((cdr) `(set-cdr! ,@(cdr F) ,V))
+          ((cadr) `(setf! (car (cdr ,@(cdr F))) ,V))
+          ((cddr) `(setf! (cdr (cdr ,@(cdr F))) ,V))
+                ; I need to handle other cadda..vers but I'm tired...
+          (else `(,(string->symbol (string-append (-ref-less (car F)) "-set!"))
+                  ,@(cdr F) ,V)))))
+
+
+	oleg@pobox.com
+	http://pobox.com/~oleg/ftp/Scheme/
+
+-----== Posted via Deja News, The Leader in Internet Discussion ==-----
+http://www.dejanews.com/rg_mkgrp.xp   Create Your Own Free Member Forum

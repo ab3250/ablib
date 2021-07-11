@@ -1,0 +1,15 @@
+(define-macro cond
+  (lambda args
+    (if (null? args)
+        '(void)
+        (if (null? (cdr args))
+            `(if ,(car (car args))
+                 (begin ,@(cdr (car args)))
+                 ,(void))
+            (if (eq? (car (cadr args)) 'else)
+                `(if ,(car (car args))
+                     (begin ,@(cdr (car args)))
+                     (begin ,@(cdr (cadr args))))
+                `(if ,(car (car args))
+                     (begin ,@(cdr (car args)))
+                     (cond ,@(cdr args))))))))

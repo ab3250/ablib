@@ -1,0 +1,89 @@
+
+The following is a public-service announcement about macro expansion
+memoization.
+
+It's pretty obvious that the old Maclisp-style macro expansion
+memoization technique, where a direct S-expression interpreter uses
+SET-CAR! and SET-CDR! to clobber its input so that the next time
+around the input appears to be the result of the macro expansion, is
+error-prone.  There are a couple of reasons for this:
+
+1. If the expression is read-only (e.g. quoted), the system may try to
+write into that read-only memory; or unsuspecting users may find their
+list structure oddly mutated just by virtue of having passed it to
+EVAL once upon a time.  These problems can be circumvented by having
+EVAL first make a copy of the input expression.  (LOAD, of course, can
+call an internal version of EVAL that doesn't make the copy.  It got
+the S-expression from READ, which presumably returns all fresh
+structure.)
+
+2. If the macro might produce a result S-expression that contains
+shared structure, where this structure contains some stuff that
+becomes a macro application in one place and something else (a formal
+parameter list, or a quotation, for example) in another, then havoc
+will ensue.  An example using Common Lisp macros:
+
+    (defmacro show (x)
+      `(list ',x '= ,x))
+
+    (show (let ((y 3)) y))  =>  ?
+
+If LET is a macro that clobbers its input, then the clobberred version
+(which could be some horrible internal interpreter data structure, or
+who knows what) will appear in the quoted constant.  This would not be
+good.
+
+OK, so suppose that memoization is somehow accomplished
+non-destructively, but is still keyed only on the EQ-identity of the
+input expression.  (Perhaps the appropriate pairs have an extra hidden
+cell, or the implementation has EQ-hashed lookup tables.)  If macros
+are pure functions of the input text, this would probably work.
+However, if the expansion of an expression is ever sensitive to the
+context in which it's expanded, then incorrect results can again
+ensue.  Another example from Common Lisp:
+
+    (defmacro silly (name exp)
+      `(list ,exp (flet ((,name () "inner mac")) ,exp)))
+
+    (defmacro mac () "outer mac")
+
+    (silly (mac))
+
+This should give the result ("outer mac" "inner mac"), but if the
+expansion of the expression (mac) is memoized, the result will be a
+two-element list with both elements the same.  Note that this doesn't
+depend on name capture; the same problem would come up with R4RS
+macros.  It only relies on being able to shadow a name's binding to a
+macro.
+
+Even if macro bindings are global, and cannot be lexically shadowed,
+memoization can lose if it can be context-dependent in any way.  For
+example, the "subkeywords" feature of R5RS macros allows a macro to
+expand in different ways depending on the bindings of names in the
+input expression.  For example:
+
+    (define-syntax mumble (syntax-rules ()
+			    ((mumble var exp)
+			     (list exp (let ((var 13)) exp)))))
+    (define-syntax grumble (syntax-rules (a)
+			     ((grumble a) 5)
+			     ((grumble x) 8)))
+    (let ((a 3))
+      (mumble a (grumble a)))  ;should be (5 8), not (5 5)
+
+But even this failure mode could be prevented if the implementation of
+SYNTAX-RULES were clever enough to make copies of inserted text, so
+that each separate instance was memoized independently.  User-written
+low-level macros might still have to worry about this problem,
+however, but that would depend on the details of the low-level system.
+
+So: practice safe memoization.  If you feel you must memoize, try to
+make sure that (a) memoization is non-destructive (or at least doesn't
+affect the behavior of CAR and CDR in any observable way), and (b)
+macro output doesn't contain shared substructure.  Of course there is
+no need for EQ-memoization if the input expression is only examined
+and expanded once, as would happen in any kind of copying translation
+scheme, whether to S-expression, S-code, byte code(s?), or native
+code.  And if you are worried about the speed of LOAD, remember that
+such translation can be accomplished incrementally, one
+lambda-expression at a time.

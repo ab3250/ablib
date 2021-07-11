@@ -1,0 +1,30 @@
+This directory contains files for SLLGEN, an LL(1) lexer & parser generator
+I wrote for my COM3351 programming languages class.
+
+The parser generator does a correct LL(1) parser generation, including
+checking for the LL(1) property.
+
+The package currently runs in Chez Scheme.  A compatibility package for MIT
+Scheme is included.  It should be easy to port to MacGambit and scm; anyone
+who is interested should let me know.
+
+The files are:
+
+sllgen.scm		Source code for the system
+
+chezmacros.scm		Macro package for Chez Scheme
+
+mitmacros.scm		Macro package for MIT scheme
+
+intro.ps		User's guide (such as it is).  This is actually the
+			notes from lectue 3 of my PL course.
+
+example.scm		An example that we use extensively in the course.
+
+--Mitch 
+
+Mitchell Wand				      Internet: wand@ccs.neu.edu
+College of Computer Science, Northeastern University
+360 Huntington Avenue #161CN, Boston, MA 02115     Phone: (617) 373 2072
+World Wide Web: http://www.ccs.neu.edu/home/wand   Fax:   (617) 373 5121
+
